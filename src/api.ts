@@ -3,6 +3,42 @@ const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api/v1')
 export type AdminResource = 'competitions' | 'matches' | 'teams' | 'players' | 'standings' | 'venues' | 'news' | 'events' | 'media' | 'match-events' | 'match-statistics' | 'lineups';
 export type RecordData = Record<string, unknown>;
 
+export type DashboardUser = { id: string; email: string; display_name: string; role: string };
+export type AuthResult = { token: string; user: DashboardUser };
+
+async function publicAuthRequest<T>(path: string, payload?: Record<string, string>): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method: payload ? 'POST' : 'GET',
+      headers: { Accept: 'application/json', ...(payload ? { 'Content-Type': 'application/json' } : {}) },
+      ...(payload ? { body: JSON.stringify(payload) } : {}),
+    });
+  } catch {
+    throw new Error(`Could not reach ${API_URL}. Start the backend and allow http://localhost:5173 in ALLOWED_ORIGINS.`);
+  }
+  const body = await response.json().catch(() => ({})) as RecordData;
+  if (!response.ok) throw new ApiError(response.status, String(body.error ?? 'request_failed'), String(body.message ?? 'The request could not be completed.'));
+  return body.data as T;
+}
+
+export function getRegistrationStatus(): Promise<{ registrationOpen: boolean }> {
+  return publicAuthRequest('/auth/status');
+}
+
+export function loginDashboard(email: string, password: string): Promise<AuthResult> {
+  return publicAuthRequest('/auth/login', { email, password });
+}
+
+export function registerDashboard(name: string, email: string, password: string): Promise<AuthResult> {
+  return publicAuthRequest('/auth/register', { name, email, password });
+}
+
+export function getCurrentUser(token: string): Promise<DashboardUser> {
+  return request<{ data: DashboardUser }>('/auth/me', token).then((body) => body.data);
+}
+
+
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
     super(message);

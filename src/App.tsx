@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { AdminResource, ApiError, RecordData, deleteRecord, getOverview, getResource, health, saveRecord } from './api';
+import { AdminResource, RecordData, deleteRecord, getCurrentUser, getOverview, getRegistrationStatus, getResource, health, loginDashboard, registerDashboard, saveRecord } from './api';
 
 type Field = { key: string; label: string; type?: 'text' | 'number' | 'date' | 'datetime-local' | 'textarea' | 'checkbox' | 'url' | 'select'; required?: boolean; options?: string[]; hint?: string; related?: AdminResource };
 type ResourceConfig = { title: string; singular: string; eyebrow: string; fields: Field[]; columns: string[] };
@@ -101,6 +101,13 @@ function App() {
   const [apiOnline, setApiOnline] = useState(false);
   const [tokenDraft, setTokenDraft] = useState('');
   const [token, setToken] = useState('');
+  const [authReady, setAuthReady] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [registrationOpen, setRegistrationOpen] = useState(false);
+  const [emailDraft, setEmailDraft] = useState('');
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [nameDraft, setNameDraft] = useState('');
+  const [accountName, setAccountName] = useState('Admin');
   const [activeLabel, setActiveLabel] = useState('Overview');
   const [overview, setOverview] = useState<Record<string, number>>({});
   const [rows, setRows] = useState<RecordData[]>([]);
@@ -123,19 +130,53 @@ function App() {
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    async function restoreSession() {
+      const saved = sessionStorage.getItem('afconDashboardSession');
+      if (saved) {
+        try {
+          const user = await getCurrentUser(saved);
+          if (!alive) return;
+          setToken(saved);
+          setAccountName(user.display_name || user.email);
+          setAuthReady(true);
+          return;
+        } catch {
+          sessionStorage.removeItem('afconDashboardSession');
+        }
+      }
+      try {
+        const status = await getRegistrationStatus();
+        if (!alive) return;
+        setRegistrationOpen(status.registrationOpen);
+        setAuthMode(status.registrationOpen ? 'register' : 'login');
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : 'Could not reach the backend.');
+      } finally {
+        if (alive) setAuthReady(true);
+      }
+    }
+    restoreSession();
+    return () => { alive = false; };
+  }, []);
+
   async function connect(event: FormEvent) {
     event.preventDefault();
-    if (!tokenDraft.trim()) return;
     setBusy(true);
     setError('');
     try {
-      const result = await getOverview(tokenDraft.trim());
-      setToken(tokenDraft.trim());
-      setOverview(result.data);
-      setNotice('Dashboard connected.');
+      const result = authMode === 'register'
+        ? await registerDashboard(nameDraft.trim(), emailDraft.trim(), passwordDraft)
+        : await loginDashboard(emailDraft.trim(), passwordDraft);
+      sessionStorage.setItem('afconDashboardSession', result.token);
+      setToken(result.token);
+      setAccountName(result.user.display_name || result.user.email);
+      setRegistrationOpen(false);
+      setNotice(authMode === 'register' ? 'Owner account created.' : 'Signed in successfully.');
+      try { setOverview((await getOverview(result.token)).data); } catch { setOverview({}); }
     } catch (err) {
-      setError(err instanceof ApiError && err.status === 401 ? 'That admin token was rejected.' : err instanceof Error ? err.message : 'Could not connect to the backend.');
-      setToken('');
+      setError(err instanceof Error ? err.message : 'Could not sign in to the backend.');
     } finally {
       setBusy(false);
     }
@@ -255,6 +296,29 @@ function App() {
     }
   }
 
+  if (!authReady) return <main className="auth-shell"><section className="auth-card"><div className="brand-ball">AF</div><span className="eyebrow">AFCON FAN CONTROL ROOM</span><h1>Checking your session</h1><p>Connecting to the dashboard securely?</p></section></main>;
+
+  if (!token) return (
+    <main className="auth-shell">
+      <section className="auth-card">
+        <div className="brand-ball">AF</div>
+        <span className="eyebrow">{authMode === 'register' ? 'FIRST-TIME SETUP' : 'SECURE DASHBOARD ACCESS'}</span>
+        <h1>{authMode === 'register' ? 'Create owner account' : 'Welcome back'}</h1>
+        <p>{authMode === 'register' ? 'Set up the owner account for the AFCON Fan dashboard.' : 'Sign in to manage content shown in the AFCON Fan app.'}</p>
+        <form className="auth-form" onSubmit={connect}>
+          {authMode === 'register' && <label>Your name<input autoComplete="name" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} required /></label>}
+          <label>Email address<input type="email" autoComplete="email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} required /></label>
+          <label>Password<input type="password" autoComplete={authMode === 'register' ? 'new-password' : 'current-password'} minLength={authMode === 'register' ? 12 : undefined} value={passwordDraft} onChange={(event) => setPasswordDraft(event.target.value)} required />{authMode === 'register' && <small>Use at least 12 characters.</small>}</label>
+          {error && <div className="auth-error">{error}</div>}
+          <button className="button button-primary auth-submit" disabled={busy}>{busy ? 'Please wait?' : authMode === 'register' ? 'Create account' : 'Sign in'}</button>
+        </form>
+        <button className="auth-switch" onClick={() => { setError(''); setAuthMode(authMode === 'register' ? 'login' : 'register'); }}>{authMode === 'register' ? 'Already have an account? Sign in' : 'Create the first owner account'}</button>
+        {!apiOnline && <div className="auth-hint">Backend not reachable. Check the API at <code>http://localhost:8080</code> and allow the Vite origin in ALLOWED_ORIGINS.</div>}
+      </section>
+      <div className="auth-footer">OFFICIAL AFCON FAN CONTROL ROOM <span>Competition updates. One trusted source.</span></div>
+    </main>
+  );
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -276,7 +340,7 @@ function App() {
           <div><strong>Need a hand?</strong><span>Read the dashboard guide</span></div>
           <span className="sidebar-arrow">↗</span>
         </div>
-        <div className="sidebar-user"><div className="user-avatar">AD</div><div><strong>Admin workspace</strong><span>AFCON FAN</span></div><button title="Disconnect" onClick={() => { setToken(''); setOverview({}); setRows([]); setNotice('Disconnected.'); }}>↪</button></div>
+        <div className="sidebar-user"><div className="user-avatar">AD</div><div><strong>Admin workspace</strong><span>AFCON FAN</span></div><button title="Disconnect" onClick={() => { sessionStorage.removeItem('afconDashboardSession'); setToken(''); setOverview({}); setRows([]); setAuthMode('login'); setNotice('Signed out.'); }}>↪</button></div>
       </aside>
 
       <main className="main-area">
@@ -295,7 +359,7 @@ function App() {
 
           {activeLabel === 'Overview' ? (
             <>
-              <div className="page-heading"><div><div className="eyebrow">THURSDAY, MATCHDAY CONTROL</div><h1>Good morning, Admin <span>✦</span></h1><p>Here’s the latest overview of your tournament workspace.</p></div><button className="button button-light" onClick={() => token ? getOverview(token).then((result) => setOverview(result.data)).catch((err) => setError(String(err))) : setError('Connect the backend to refresh tournament data.')}>↻ <span>Refresh data</span></button></div>
+              <div className="page-heading"><div><div className="eyebrow">THURSDAY, MATCHDAY CONTROL</div><h1>Good morning, {accountName.split(' ')[0]} <span>✦</span></h1><p>Here’s the latest overview of your tournament workspace.</p></div><button className="button button-light" onClick={() => token ? getOverview(token).then((result) => setOverview(result.data)).catch((err) => setError(String(err))) : setError('Connect the backend to refresh tournament data.')}>↻ <span>Refresh data</span></button></div>
               {!token && <section className="connect-card"><div className="connect-symbol">⌘</div><div className="connect-copy"><strong>Connect your admin API</strong><span>Enter the ADMIN_API_TOKEN from backend/.env. The token stays in this browser session only.</span></div><form onSubmit={connect}><input type="password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} placeholder="Admin API token" aria-label="Admin API token" /><button className="button button-primary" disabled={busy}>{busy ? 'Connecting…' : 'Connect'}</button></form></section>}
               <section className="hero-card"><div className="hero-pattern" /><div className="hero-copy"><div className="hero-kicker"><span className="hero-dot" /> TOURNAMENT OPERATIONS</div><h2>Everything fans need,<br />ready for matchday.</h2><p>Manage verified fixtures, team profiles and stories from one place.</p><button className="button button-gold" onClick={() => navigate('Matches')}>Manage matches <span>→</span></button></div><div className="hero-pitch"><div className="pitch-line center-line" /><div className="pitch-circle" /><div className="pitch-box pitch-left" /><div className="pitch-box pitch-right" /><div className="pitch-ball">⚽</div></div><div className="hero-footnote"><span>✦</span> Together in football</div></section>
               <div className="section-title-row"><div><h2>Workspace overview</h2><p>Content totals across the tournament</p></div><div className="period-tag">ALL CONTENT <span>⌄</span></div></div>
