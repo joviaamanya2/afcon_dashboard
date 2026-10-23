@@ -1,0 +1,68 @@
+/* Clearer type and tighter alignment between the sidebar and page content. */
+.page-content { max-width: none; margin: 0; padding-left: 24px; padding-right: 28px; }
+.topbar { padding-left: 24px; padding-right: 28px; }
+.brand strong { font-size: 15px; }
+.brand span { font-size: 11px; }
+.sidebar-label { font-size: 11px; }
+.nav-item { font-size: 14px; padding-top: 11px; padding-bottom: 11px; }
+.nav-icon { font-size: 17px; }
+.sidebar-bottom strong, .sidebar-user strong { font-size: 12px; }
+.sidebar-bottom span, .sidebar-user span { font-size: 10px; }
+.breadcrumbs { font-size: 13px; }
+.connection-pill { font-size: 12px; }
+.page-heading h1 { font-size: 29px; }
+.page-heading p, .section-title-row p, .panel-heading p, .records-toolbar p { font-size: 13px; }
+.eyebrow { font-size: 11px; }
+.button { font-size: 13px; }
+.connect-copy strong { font-size: 13px; }
+.connect-copy span { font-size: 12px; }
+.connect-card input, .table-search input { font-size: 12px; }
+.hero-card { min-height: 218px; }
+.hero-kicker { font-size: 10px; }
+.hero-copy h2 { font-size: 27px; }
+.hero-copy p { font-size: 12px; }
+.hero-footnote { font-size: 11px; }
+.section-title-row h2 { font-size: 18px; }
+.period-tag { font-size: 10px; }
+.metric-card { min-height: 122px; padding: 15px 16px; }
+.metric-label { font-size: 11px; }
+.metric-card > strong { font-size: 24px; }
+.metric-foot { font-size: 10px; }
+.metric-icon { width: 31px; height: 31px; font-size: 16px; }
+.activity-panel, .quick-panel { padding: 18px; }
+.panel-heading h3 { font-size: 14px; }
+.panel-heading button { font-size: 11px; }
+.chart-y, .bar-group, .chart-legend { font-size: 10px; }
+.quick-actions strong { font-size: 12px; }
+.quick-actions button { padding: 10px 0; }
+.bottom-strip strong { font-size: 11px; }
+.bottom-strip span, .bottom-strip button { font-size: 10px; }
+.records-toolbar h2 { font-size: 17px; }
+.records-toolbar h2 span { font-size: 11px; }
+th { font-size: 10px; }
+td { font-size: 12px; }
+.status-tag { font-size: 10px; }
+.row-edit { font-size: 11px; }
+.row-actions { display: flex; gap: 6px; }
+.row-delete { border: 1px solid #f0d8d4; border-radius: 5px; padding: 5px 8px; background: #fff8f7; color: #a64032; font-size: 11px; }
+.table-empty strong { font-size: 13px; }
+.table-empty p { font-size: 12px; }
+.records-note { font-size: 11px; }
+.form-field > span { font-size: 12px; }
+.form-field input, .form-field textarea, .form-field select { font-size: 12px; }
+.form-field small { font-size: 10px; }
+.modal-header h2 { font-size: 20px; }
+
+@media (max-width: 1100px) {
+  .page-content { padding-left: 20px; padding-right: 20px; }
+  .topbar { padding-left: 20px; padding-right: 20px; }
+}
+@media (max-width: 800px) {
+  .page-content { padding-left: 16px; padding-right: 16px; }
+  .topbar { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 520px) {
+  .page-content { padding-left: 12px; padding-right: 12px; }
+  .topbar { padding-left: 12px; padding-right: 12px; }
+  .page-heading h1 { font-size: 24px; }
+}
