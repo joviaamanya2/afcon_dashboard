@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { AdminResource, RecordData, deleteRecord, getCurrentUser, getOverview, getRegistrationStatus, getResource, health, loginDashboard, registerDashboard, saveRecord } from './api';
+import { AdminResource, RecordData, deleteRecord, getOverview, getResource, health, saveRecord } from './api';
 
 type Field = { key: string; label: string; type?: 'text' | 'number' | 'date' | 'datetime-local' | 'textarea' | 'checkbox' | 'url' | 'select'; required?: boolean; options?: string[]; hint?: string; related?: AdminResource };
-type ResourceConfig = { title: string; singular: string; eyebrow: string; fields: Field[]; columns: string[] };
+type ResourceConfig = { title: string; singular: string; eyebrow: string; fields: Field[]; columns: string[]; allowCreate?: boolean; allowDelete?: boolean };
 
 const resourceConfig: Record<AdminResource, ResourceConfig> = {
   competitions: { title: 'Competitions', singular: 'competition', eyebrow: 'TOURNAMENT SETUP', fields: [
@@ -41,6 +41,15 @@ const resourceConfig: Record<AdminResource, ResourceConfig> = {
   media: { title: 'Media library', singular: 'media item', eyebrow: 'PHOTOS & VIDEO', fields: [
     { key: 'title', label: 'Title', required: true }, { key: 'description', label: 'Description', type: 'textarea' }, { key: 'mediaType', label: 'Media type', type: 'select', required: true, options: ['image', 'video', 'audio'] }, { key: 'url', label: 'Asset URL', type: 'url', required: true }, { key: 'thumbnailUrl', label: 'Thumbnail URL', type: 'url' }, { key: 'teamId', label: 'Team', related: 'teams' }, { key: 'territory', label: 'Licensed territory' }, { key: 'rightsStart', label: 'Rights start', type: 'datetime-local' }, { key: 'rightsEnd', label: 'Rights end', type: 'datetime-local' }, { key: 'publishedAt', label: 'Publish date', type: 'datetime-local' }, { key: 'published', label: 'Publish to the app', type: 'checkbox' },
   ], columns: ['title', 'media_type', 'territory', 'rights_end', 'published'] },
+  'community-posts': { title: 'Community posts', singular: 'post', eyebrow: 'FAN COMMUNITY', fields: [
+    { key: 'status', label: 'Moderation status', type: 'select', required: true, options: ['pending', 'published', 'hidden', 'removed'] },
+  ], columns: ['display_name', 'content', 'status', 'created_at', 'likes_count', 'comments_count'], allowCreate: false, allowDelete: false },
+  'community-comments': { title: 'Community comments', singular: 'comment', eyebrow: 'FAN COMMUNITY', fields: [
+    { key: 'status', label: 'Moderation status', type: 'select', required: true, options: ['pending', 'published', 'hidden', 'removed'] },
+  ], columns: ['display_name', 'content', 'status', 'created_at'], allowCreate: false, allowDelete: false },
+  'community-reports': { title: 'Community reports', singular: 'report', eyebrow: 'FAN COMMUNITY', fields: [
+    { key: 'status', label: 'Review status', type: 'select', required: true, options: ['open', 'resolved', 'dismissed'] },
+  ], columns: ['target_type', 'reported_content', 'reason', 'reporter_name', 'status', 'created_at'], allowCreate: false, allowDelete: false },
 };
 
 const nav: { label: string; resource?: AdminResource; icon: string }[] = [
@@ -57,6 +66,9 @@ const nav: { label: string; resource?: AdminResource; icon: string }[] = [
   { label: 'News & updates', resource: 'news', icon: '▧' },
   { label: 'Fan events', resource: 'events', icon: '▦' },
   { label: 'Media library', resource: 'media', icon: '▷' },
+  { label: 'Community posts', resource: 'community-posts', icon: '☷' },
+  { label: 'Community comments', resource: 'community-comments', icon: '☏' },
+  { label: 'Community reports', resource: 'community-reports', icon: '⚑' },
 ];
 
 const metricConfig = [
@@ -79,7 +91,7 @@ function dateInputValue(value: unknown): string {
   if (typeof value !== 'string') return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value.slice(0, 16);
-  return date.toISOString().slice(0, 16);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 function recordField(record: RecordData | null | false, key: string): unknown {
@@ -102,11 +114,6 @@ function App() {
   const [tokenDraft, setTokenDraft] = useState('');
   const [token, setToken] = useState('');
   const [authReady, setAuthReady] = useState(false);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [registrationOpen, setRegistrationOpen] = useState(false);
-  const [emailDraft, setEmailDraft] = useState('');
-  const [passwordDraft, setPasswordDraft] = useState('');
-  const [nameDraft, setNameDraft] = useState('');
   const [accountName, setAccountName] = useState('Admin');
   const [activeLabel, setActiveLabel] = useState('Overview');
   const [overview, setOverview] = useState<Record<string, number>>({});
@@ -136,26 +143,17 @@ function App() {
       const saved = sessionStorage.getItem('afconDashboardSession');
       if (saved) {
         try {
-          const user = await getCurrentUser(saved);
+          const result = await getOverview(saved);
           if (!alive) return;
           setToken(saved);
-          setAccountName(user.display_name || user.email);
+          setOverview(result.data);
           setAuthReady(true);
           return;
         } catch {
           sessionStorage.removeItem('afconDashboardSession');
         }
       }
-      try {
-        const status = await getRegistrationStatus();
-        if (!alive) return;
-        setRegistrationOpen(status.registrationOpen);
-        setAuthMode(status.registrationOpen ? 'register' : 'login');
-      } catch (err) {
-        if (alive) setError(err instanceof Error ? err.message : 'Could not reach the backend.');
-      } finally {
-        if (alive) setAuthReady(true);
-      }
+      if (alive) setAuthReady(true);
     }
     restoreSession();
     return () => { alive = false; };
@@ -166,17 +164,15 @@ function App() {
     setBusy(true);
     setError('');
     try {
-      const result = authMode === 'register'
-        ? await registerDashboard(nameDraft.trim(), emailDraft.trim(), passwordDraft)
-        : await loginDashboard(emailDraft.trim(), passwordDraft);
-      sessionStorage.setItem('afconDashboardSession', result.token);
-      setToken(result.token);
-      setAccountName(result.user.display_name || result.user.email);
-      setRegistrationOpen(false);
-      setNotice(authMode === 'register' ? 'Owner account created.' : 'Signed in successfully.');
-      try { setOverview((await getOverview(result.token)).data); } catch { setOverview({}); }
+      const adminToken = tokenDraft.trim();
+      const result = await getOverview(adminToken);
+      sessionStorage.setItem('afconDashboardSession', adminToken);
+      setToken(adminToken);
+      setOverview(result.data);
+      setAccountName('Admin');
+      setNotice('Dashboard connected successfully.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not sign in to the backend.');
+      setError(err instanceof Error ? err.message : 'Could not connect to the backend.');
     } finally {
       setBusy(false);
     }
@@ -277,7 +273,7 @@ function App() {
   }
 
   async function removeRecord(row: RecordData) {
-    if (!activeResource || !token || (!row.id && activeResource !== 'match-statistics')) return;
+    if (!activeResource || config?.allowDelete === false || !token || (!row.id && activeResource !== 'match-statistics')) return;
     const name = String(row.name ?? row.title ?? config?.singular ?? 'record');
     if (!window.confirm(`Delete “${name}”? This cannot be undone.`)) return;
     setBusy(true);
@@ -302,18 +298,15 @@ function App() {
     <main className="auth-shell">
       <section className="auth-card">
         <div className="brand-ball">AF</div>
-        <span className="eyebrow">{authMode === 'register' ? 'FIRST-TIME SETUP' : 'SECURE DASHBOARD ACCESS'}</span>
-        <h1>{authMode === 'register' ? 'Create owner account' : 'Welcome back'}</h1>
-        <p>{authMode === 'register' ? 'Set up the owner account for the AFCON Fan dashboard.' : 'Sign in to manage content shown in the AFCON Fan app.'}</p>
+        <span className="eyebrow">SECURE DASHBOARD ACCESS</span>
+        <h1>Connect to your backend</h1>
+        <p>Enter the admin API token configured in the backend environment.</p>
         <form className="auth-form" onSubmit={connect}>
-          {authMode === 'register' && <label>Your name<input autoComplete="name" value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} required /></label>}
-          <label>Email address<input type="email" autoComplete="email" value={emailDraft} onChange={(event) => setEmailDraft(event.target.value)} required /></label>
-          <label>Password<input type="password" autoComplete={authMode === 'register' ? 'new-password' : 'current-password'} minLength={authMode === 'register' ? 12 : undefined} value={passwordDraft} onChange={(event) => setPasswordDraft(event.target.value)} required />{authMode === 'register' && <small>Use at least 12 characters.</small>}</label>
+          <label>Admin API token<input type="password" autoComplete="current-password" value={tokenDraft} onChange={(event) => setTokenDraft(event.target.value)} required /></label>
           {error && <div className="auth-error">{error}</div>}
-          <button className="button button-primary auth-submit" disabled={busy}>{busy ? 'Please wait?' : authMode === 'register' ? 'Create account' : 'Sign in'}</button>
+          <button className="button button-primary auth-submit" disabled={busy || !tokenDraft.trim()}>{busy ? 'Connecting…' : 'Connect dashboard'}</button>
         </form>
-        <button className="auth-switch" onClick={() => { setError(''); setAuthMode(authMode === 'register' ? 'login' : 'register'); }}>{authMode === 'register' ? 'Already have an account? Sign in' : 'Create the first owner account'}</button>
-        {!apiOnline && <div className="auth-hint">Backend not reachable. Check the API at <code>http://localhost:8080</code> and allow the Vite origin in ALLOWED_ORIGINS.</div>}
+        {!apiOnline && <div className="auth-hint">Backend not reachable. Start the API at <code>http://localhost:8080</code> and allow this dashboard origin in <code>APP_ORIGINS</code>.</div>}
       </section>
       <div className="auth-footer">OFFICIAL AFCON FAN CONTROL ROOM <span>Competition updates. One trusted source.</span></div>
     </main>
@@ -340,7 +333,7 @@ function App() {
           <div><strong>Need a hand?</strong><span>Read the dashboard guide</span></div>
           <span className="sidebar-arrow">↗</span>
         </div>
-        <div className="sidebar-user"><div className="user-avatar">AD</div><div><strong>Admin workspace</strong><span>AFCON FAN</span></div><button title="Disconnect" onClick={() => { sessionStorage.removeItem('afconDashboardSession'); setToken(''); setOverview({}); setRows([]); setAuthMode('login'); setNotice('Signed out.'); }}>↪</button></div>
+        <div className="sidebar-user"><div className="user-avatar">AD</div><div><strong>Admin workspace</strong><span>AFCON FAN</span></div><button title="Disconnect" onClick={() => { sessionStorage.removeItem('afconDashboardSession'); setToken(''); setOverview({}); setRows([]); setNotice('Signed out.'); }}>↪</button></div>
       </aside>
 
       <main className="main-area">
@@ -369,9 +362,9 @@ function App() {
             </>
           ) : (
             <>
-              <div className="page-heading resource-heading"><div><div className="eyebrow">{config?.eyebrow}</div><h1>{config?.title}</h1><p>Manage records shown in the AFCON Fan app.</p></div><button className="button button-primary" onClick={() => token ? setEditor(null) : setError('Connect the admin API from Overview before editing records.')}><span>＋</span> Add {config?.singular}</button></div>
+              <div className="page-heading resource-heading"><div><div className="eyebrow">{config?.eyebrow}</div><h1>{config?.title}</h1><p>{activeResource?.startsWith('community-') ? 'Review fan content before it appears in the community feed.' : 'Manage records shown in the AFCON Fan app.'}</p></div>{config?.allowCreate !== false && <button className="button button-primary" onClick={() => token ? setEditor(null) : setError('Connect the admin API from Overview before editing records.')}><span>＋</span> Add {config?.singular}</button>}</div>
               {!token && <section className="connect-card"><div className="connect-symbol">⌘</div><div className="connect-copy"><strong>Admin connection needed</strong><span>Connect your backend token from Overview to view or edit records.</span></div><button className="button button-primary" onClick={() => navigate('Overview')}>Open overview</button></section>}
-              <section className="panel records-panel"><div className="records-toolbar"><div><h2>{config?.title} <span>{rows.length}</span></h2><p>Manage and publish tournament information</p></div><div className="records-tools"><div className="table-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search records" /></div><button className="button button-light" onClick={() => activeResource && loadResource(activeResource)}>↻</button></div></div>{busy ? <div className="table-empty"><div className="spinner" /><strong>Loading records…</strong></div> : !token ? <div className="table-empty"><span className="empty-icon">⌘</span><strong>Connect to load {config?.title.toLowerCase()}</strong><p>Your content will appear here once the backend is connected.</p></div> : filteredRows.length === 0 ? <div className="table-empty"><span className="empty-icon">＋</span><strong>{search ? 'No matching records' : `No ${config?.title.toLowerCase()} yet`}</strong><p>{search ? 'Try a different search.' : `Add your first ${config?.singular} to start filling the app.`}</p>{!search && <button className="button button-primary" onClick={() => setEditor(null)}>Add {config?.singular}</button>}</div> : <div className="table-scroll"><table><thead><tr>{config?.columns.map((column) => <th key={column}>{column.replaceAll('_', ' ')}</th>)}<th /></tr></thead><tbody>{filteredRows.map((row, index) => <tr key={String(row.id ?? index)}>{config?.columns.map((column) => <td key={column}>{column === 'published' ? <span className={`status-tag ${row[column] ? 'published' : 'draft'}`}><i />{row[column] ? 'Published' : 'Draft'}</span> : column.endsWith('_at') && row[column] ? new Date(String(row[column])).toLocaleString() : <span title={pretty(row[column])}>{pretty(row[column])}</span>}</td>)}<td><div className="row-actions"><button className="row-edit" onClick={() => setEditor(row)} aria-label={`Edit ${config?.singular}`}>Edit</button><button className="row-delete" onClick={() => removeRecord(row)} aria-label={`Delete ${config?.singular}`}>Delete</button></div></td></tr>)}</tbody></table></div>}</section>
+              <section className="panel records-panel"><div className="records-toolbar"><div><h2>{config?.title} <span>{rows.length}</span></h2><p>{activeResource?.startsWith('community-') ? 'Review and moderate user-generated content' : 'Manage and publish tournament information'}</p></div><div className="records-tools"><div className="table-search"><span>⌕</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search records" /></div><button className="button button-light" onClick={() => activeResource && loadResource(activeResource)}>↻</button></div></div>{busy ? <div className="table-empty"><div className="spinner" /><strong>Loading records…</strong></div> : !token ? <div className="table-empty"><span className="empty-icon">⌘</span><strong>Connect to load {config?.title.toLowerCase()}</strong><p>Your content will appear here once the backend is connected.</p></div> : filteredRows.length === 0 ? <div className="table-empty"><span className="empty-icon">＋</span><strong>{search ? 'No matching records' : `No ${config?.title.toLowerCase()} yet`}</strong><p>{search ? 'Try a different search.' : `There is no ${config?.singular} to review yet.`}</p>{!search && config?.allowCreate !== false && <button className="button button-primary" onClick={() => setEditor(null)}>Add {config?.singular}</button>}</div> : <div className="table-scroll"><table><thead><tr>{config?.columns.map((column) => <th key={column}>{column.replaceAll('_', ' ')}</th>)}<th /></tr></thead><tbody>{filteredRows.map((row, index) => <tr key={String(row.id ?? index)}>{config?.columns.map((column) => <td key={column}>{column === 'published' ? <span className={`status-tag ${row[column] ? 'published' : 'draft'}`}><i />{row[column] ? 'Published' : 'Draft'}</span> : column.endsWith('_at') && row[column] ? new Date(String(row[column])).toLocaleString() : <span title={pretty(row[column])}>{pretty(row[column])}</span>}</td>)}<td><div className="row-actions"><button className="row-edit" onClick={() => setEditor(row)} aria-label={`Review ${config?.singular}`}>{config?.allowDelete === false ? 'Review' : 'Edit'}</button>{config?.allowDelete !== false && <button className="row-delete" onClick={() => removeRecord(row)} aria-label={`Delete ${config?.singular}`}>Delete</button>}</div></td></tr>)}</tbody></table></div>}</section>
               <div className="records-note"><span>ⓘ</span>Only published records appear in the fan app. Confirm rights, source and dates before publishing.</div>
             </>
           )}
