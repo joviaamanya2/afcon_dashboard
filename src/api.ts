@@ -1,4 +1,7 @@
-const API_URL = (import.meta.env.VITE_API_URL ?? 'http://localhost:8080/api/v1').replace(/\/$/, '');
+const API_URL = (
+  import.meta.env.VITE_API_URL ??
+  `http://${window.location.hostname || 'localhost'}:8080/api/v1`
+).replace(/\/$/, '');
 
 export type AdminResource = 'competitions' | 'matches' | 'teams' | 'players' | 'standings' | 'venues' | 'news' | 'events' | 'media' | 'match-events' | 'match-statistics' | 'lineups' | 'community-posts' | 'community-comments' | 'community-reports';
 export type RecordData = Record<string, unknown>;
@@ -21,7 +24,19 @@ async function request<T>(path: string, token: string, init: RequestInit = {}): 
   });
   const body = await response.json().catch(() => ({})) as RecordData;
   if (!response.ok) {
-    throw new ApiError(response.status, String(body.error ?? 'request_failed'), String(body.message ?? 'The request could not be completed.'));
+    let message = typeof body.message === 'string' ? body.message : 'The request could not be completed.';
+    const details = body.details;
+    if (details && typeof details === 'object' && !Array.isArray(details)) {
+      const fieldErrors = (details as RecordData).fieldErrors;
+      if (fieldErrors && typeof fieldErrors === 'object' && !Array.isArray(fieldErrors)) {
+        const messages = Object.entries(fieldErrors as Record<string, unknown>)
+          .flatMap(([field, errors]) => Array.isArray(errors)
+            ? errors.filter((error): error is string => typeof error === 'string').map((error) => `${field}: ${error}`)
+            : []);
+        if (messages.length) message = messages.join(' ');
+      }
+    }
+    throw new ApiError(response.status, String(body.error ?? 'request_failed'), message);
   }
   return body as T;
 }
@@ -49,6 +64,60 @@ export function saveRecord(token: string, resource: AdminResource, value: Record
     method: id ? 'PATCH' : 'POST',
     body: JSON.stringify(value),
   });
+}
+
+export function saveLineupBatch(
+  token: string,
+  value: {
+    matchId: string;
+    teamId: string;
+    formation: string;
+    published: boolean;
+    players: Array<{
+      playerId: string;
+      position: string;
+      shirtNumber: number | null;
+      isStarting: boolean;
+    }>;
+  },
+): Promise<{ data: RecordData }> {
+  return request('/admin/lineups/batch', token, {
+    method: 'POST',
+    body: JSON.stringify(value),
+  });
+}
+
+async function uploadImage(token: string, file: File, kind: 'venue' | 'player'): Promise<string> {
+  const encoded = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('The venue image could not be read.'));
+        return;
+      }
+      const separator = reader.result.indexOf(',');
+      if (separator < 0) {
+        reject(new Error('The venue image data is invalid.'));
+        return;
+      }
+      resolve(reader.result.slice(separator + 1));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error('The venue image could not be read.'));
+    reader.readAsDataURL(file);
+  });
+  const response = await request<{ data: { url: string } }>(`/admin/${kind}-images`, token, {
+    method: 'POST',
+    body: JSON.stringify({ mimeType: file.type, data: encoded }),
+  });
+  return response.data.url;
+}
+
+export function uploadVenueImage(token: string, file: File): Promise<string> {
+  return uploadImage(token, file, 'venue');
+}
+
+export function uploadPlayerImage(token: string, file: File): Promise<string> {
+  return uploadImage(token, file, 'player');
 }
 
 export function deleteRecord(token: string, resource: AdminResource, id: string): Promise<void> {
