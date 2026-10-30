@@ -27,7 +27,66 @@ const playerStatOptions = [
 ] as const;
 
 const lineupPositionOptions = ['GK', 'RB', 'CB', 'LB', 'RWB', 'LWB', 'DM', 'CM', 'AM', 'RM', 'LM', 'RW', 'LW', 'ST', 'CF'];
-const formationOptions = ['4-3-3', '4-4-2', '4-2-3-1', '3-5-2', '3-4-3', '4-1-4-1'];
+const formationOptions = ['4-3-3', '4-4-2', '4-2-3-1', '3-5-2', '3-4-3', '4-1-4-1', '5-3-2', '5-4-1', '4-5-1'];
+
+const horizontalPositionRank: Record<string, number> = {
+  // Left side
+  LB: 10, LWB: 15, LM: 20, LAM: 22, LF: 25, LW: 28,
+  // Center-left
+  LCB: 35, LDM: 38, LCM: 40,
+  // Center
+  GK: 50, CB: 50, SW: 50, DM: 50, CM: 50, AM: 50, CF: 50, ST: 50, FW: 50, FORWARD: 50,
+  // Center-right
+  RCM: 60, RDM: 62, RCB: 65,
+  // Right side
+  RAM: 75, RF: 78, RM: 80, RW: 82, RWB: 85, RB: 90,
+};
+
+function sortPitchRow(players: RecordData[]): RecordData[] {
+  return [...players].sort((a, b) => {
+    const posA = String(a.position ?? '').toUpperCase();
+    const posB = String(b.position ?? '').toUpperCase();
+    const rankA = horizontalPositionRank[posA] ?? 50;
+    const rankB = horizontalPositionRank[posB] ?? 50;
+    return rankA - rankB;
+  });
+}
+
+function getFormationDefaultPositions(formation: string): string[] {
+  switch (formation) {
+    case '4-4-2':
+      return ['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'CM', 'RM', 'ST', 'ST'];
+    case '4-2-3-1':
+      return ['GK', 'LB', 'CB', 'CB', 'RB', 'DM', 'DM', 'LM', 'AM', 'RM', 'ST'];
+    case '3-5-2':
+      return ['GK', 'CB', 'CB', 'CB', 'LWB', 'CM', 'DM', 'CM', 'RWB', 'ST', 'ST'];
+    case '3-4-3':
+      return ['GK', 'CB', 'CB', 'CB', 'LM', 'CM', 'CM', 'RM', 'LW', 'ST', 'RW'];
+    case '4-1-4-1':
+      return ['GK', 'LB', 'CB', 'CB', 'RB', 'DM', 'LM', 'CM', 'CM', 'RM', 'ST'];
+    case '5-3-2':
+      return ['GK', 'LWB', 'CB', 'CB', 'CB', 'RWB', 'CM', 'DM', 'CM', 'ST', 'ST'];
+    case '5-4-1':
+      return ['GK', 'LWB', 'CB', 'CB', 'CB', 'RWB', 'LM', 'CM', 'CM', 'RM', 'ST'];
+    case '4-5-1':
+      return ['GK', 'LB', 'CB', 'CB', 'RB', 'LM', 'CM', 'DM', 'CM', 'RM', 'ST'];
+    case '4-3-3':
+    default:
+      return ['GK', 'LB', 'CB', 'CB', 'RB', 'CM', 'DM', 'CM', 'LW', 'ST', 'RW'];
+  }
+}
+
+function formatMatchTime(isoString?: string): string {
+  if (!isoString) return 'MATCHDAY';
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return 'MATCHDAY';
+    const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    return `TODAY ${timeStr}`;
+  } catch {
+    return 'MATCHDAY';
+  }
+}
 
 type LineupPlayer = {
   playerId: string;
@@ -65,52 +124,151 @@ function lineupLine(position: string, formation: string): LineupLine {
   return 'midfield';
 }
 
+type MatchGraphicInfo = {
+  homeTeam?: string;
+  awayTeam?: string;
+  homeCrestUrl?: string;
+  awayCrestUrl?: string;
+  venueName?: string;
+  stage?: string;
+  kickoffAt?: string;
+};
+
 function LineupGraphic({
   teamName,
   formation,
   players,
   compact = false,
+  matchInfo,
 }: {
   teamName: string;
   formation: string;
   players: RecordData[];
   compact?: boolean;
+  matchInfo?: MatchGraphicInfo;
 }) {
   const starters = players.filter((player) => Boolean(player.is_starting));
   const substitutes = players.filter((player) => !player.is_starting);
   const lineOrder: LineupLine[] = ['attack', 'advanced', 'midfield', 'defence', 'goalkeeper'];
-  const lines = lineOrder.map((line) => starters.filter((player) =>
-    lineupLine(String(player.position ?? ''), formation || '') === line,
-  ));
+  const lines = lineOrder.map((line) => {
+    const inLine = starters.filter((player) =>
+      lineupLine(String(player.position ?? ''), formation || '') === line,
+    );
+    return sortPitchRow(inLine);
+  });
+
+  const homeName = matchInfo?.homeTeam || teamName || 'Home';
+  const awayName = matchInfo?.awayTeam;
+  const stage = matchInfo?.stage || 'AFCON QUALIFIERS';
+  const venue = matchInfo?.venueName || 'STADIUM VENUE';
+  const kickoff = formatMatchTime(matchInfo?.kickoffAt);
+
   return (
     <div className={`lineup-graphic ${compact ? 'compact' : ''}`}>
       <header className="lineup-graphic-header">
-        <div><span>CONFIRMED LINE-UP</span><strong>{teamName || 'Team'}</strong></div>
-        <b>{formation || 'Formation TBC'}</b>
+        <div className="lineup-header-matchup">
+          {matchInfo?.homeCrestUrl ? (
+            <img src={matchInfo.homeCrestUrl} alt="" className="lineup-header-crest" />
+          ) : (
+            <span className="lineup-header-crest-badge">{homeName.slice(0, 3).toUpperCase()}</span>
+          )}
+          {awayName && (
+            <>
+              <span className="lineup-header-vs">VS</span>
+              {matchInfo?.awayCrestUrl ? (
+                <img src={matchInfo.awayCrestUrl} alt="" className="lineup-header-crest" />
+              ) : (
+                <span className="lineup-header-crest-badge">{awayName.slice(0, 3).toUpperCase()}</span>
+              )}
+            </>
+          )}
+        </div>
+        <div className="lineup-header-title">
+          <span>CONFIRMED LINEUP</span>
+          <strong>{teamName || 'Team'}</strong>
+        </div>
+        <div className="lineup-header-branding">
+          <span className="lineup-caf-badge">AFCON</span>
+        </div>
       </header>
+
       <div className="lineup-pitch">
-        <div className="lineup-pitch-half" />
-        <div className="lineup-center-circle" />
-        {lines.map((linePlayers, lineIndex) => (
-          <div className="lineup-pitch-row" key={lineOrder[lineIndex]}>
-            {linePlayers.map((player) => (
-              <div className="lineup-pitch-player" key={String(player.player_id ?? player.playerId)}>
-                {player.photo_url ? (
-                  <img src={String(player.photo_url)} alt="" />
-                ) : (
-                  <span className="lineup-player-initial">{String(player.player_name ?? player.name ?? '?').slice(0, 1)}</span>
-                )}
-                <b>{String(player.player_name ?? player.name ?? 'Player')}</b>
-                <small>{String(player.position ?? '')}{player.shirt_number == null ? '' : ` · #${player.shirt_number}`}</small>
-              </div>
-            ))}
+        {/* Match Info Badge on Top-Left (matching reference image) */}
+        <div className="lineup-match-badge">
+          <span className="lineup-badge-stage">{stage.toUpperCase()}</span>
+          <span className="lineup-badge-time">{kickoff.toUpperCase()}</span>
+          <span className="lineup-badge-venue">{venue.toUpperCase()}</span>
+        </div>
+
+        {/* Formation Badge on Bottom-Left (matching reference image) */}
+        <div className="lineup-formation-badge">
+          <span className="lineup-formation-label">FORMATION</span>
+          <strong className="lineup-formation-val">{formation || '4-3-3'}</strong>
+        </div>
+
+        {/* Realistic pitch markings */}
+        <div className="lineup-pitch-marking-lines" aria-hidden="true">
+          <div className="lineup-pitch-border-box" />
+          <div className="lineup-pitch-half" />
+          <div className="lineup-center-circle">
+            <div className="lineup-center-dot" />
           </div>
-        ))}
+          <div className="lineup-penalty-box">
+            <div className="lineup-penalty-arc" />
+            <div className="lineup-penalty-dot" />
+            <div className="lineup-six-yard-box" />
+          </div>
+          <div className="lineup-goal-mouth" />
+        </div>
+
+        {/* Starting XI Lines */}
+        <div className="lineup-pitch-rows-container">
+          {lines.map((linePlayers, lineIndex) => (
+            <div className={`lineup-pitch-row row-${lineOrder[lineIndex]}`} key={lineOrder[lineIndex]}>
+              {linePlayers.map((player) => {
+                const name = String(player.player_name ?? player.name ?? 'Player');
+                const pos = String(player.position ?? '');
+                const shirtNum = player.shirt_number != null ? String(player.shirt_number) : '';
+                return (
+                  <div className="lineup-pitch-player" key={String(player.player_id ?? player.playerId)}>
+                    <div className="lineup-player-avatar-wrap">
+                      {player.photo_url ? (
+                        <img src={String(player.photo_url)} alt={name} className="lineup-player-photo" />
+                      ) : (
+                        <div className="lineup-player-silhouette">
+                          <span className="lineup-player-num">{shirtNum || name.slice(0, 1).toUpperCase()}</span>
+                        </div>
+                      )}
+                      {shirtNum && <span className="lineup-player-shirt-badge">{shirtNum}</span>}
+                    </div>
+                    {/* Dark sleek red-accent nameplate matching reference image */}
+                    <div className="lineup-nameplate">
+                      <span className="lineup-nameplate-name">{name.toUpperCase()}</span>
+                      {pos && <span className="lineup-nameplate-pos">{pos}</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
       </div>
+
       {!compact && substitutes.length > 0 && (
         <footer className="lineup-substitutes">
-          <strong>Substitutes</strong>
-          <span>          {substitutes.map((player) => `${String(player.player_name ?? player.name ?? 'Player')}${player.position ? ` (${String(player.position)})` : ''}`).join(' · ')}</span>
+          <div className="lineup-subs-header">
+            <strong>SUBSTITUTES</strong>
+            <span>({substitutes.length} players)</span>
+          </div>
+          <div className="lineup-subs-chips">
+            {substitutes.map((player) => (
+              <span className="lineup-sub-chip" key={String(player.player_id ?? player.playerId)}>
+                {player.shirt_number != null ? <b>#{String(player.shirt_number)}</b> : null}
+                <span>{String(player.player_name ?? player.name ?? 'Player')}</span>
+                {player.position ? <i>({String(player.position)})</i> : null}
+              </span>
+            ))}
+          </div>
         </footer>
       )}
     </div>
@@ -127,7 +285,12 @@ function LineupDashboardPreview({ rows }: { rows: RecordData[] }) {
   if (!previews.length) return null;
   return (
     <section className="lineup-preview-section">
-      <div className="section-title-row"><div><h2>Line-up previews</h2><p>Starting players arranged by their positions</p></div></div>
+      <div className="section-title-row">
+        <div>
+          <h2>Line-up previews</h2>
+          <p>Confirmed match squads arranged on the pitch by position and formation</p>
+        </div>
+      </div>
       <div className="lineup-preview-grid">
         {previews.map(([key, players]) => (
           <LineupGraphic
@@ -136,6 +299,15 @@ function LineupDashboardPreview({ rows }: { rows: RecordData[] }) {
             formation={String(players[0]?.formation ?? '')}
             players={players}
             compact
+            matchInfo={{
+              homeTeam: String(players[0]?.home_team ?? ''),
+              awayTeam: String(players[0]?.away_team ?? ''),
+              homeCrestUrl: String(players[0]?.home_crest_url ?? ''),
+              awayCrestUrl: String(players[0]?.away_crest_url ?? ''),
+              stage: String(players[0]?.stage ?? ''),
+              venueName: String(players[0]?.venue_name ?? ''),
+              kickoffAt: String(players[0]?.kickoff_at ?? ''),
+            }}
           />
         ))}
       </div>
@@ -163,6 +335,8 @@ function LineupEditor({
     editor && typeof editor === 'object' ? Boolean(editor.published) : false,
   );
   const [players, setPlayers] = useState(() => existingLineupPlayers(rows, initialMatch, initialTeam));
+  const [squadFilter, setSquadFilter] = useState<'all' | 'starters' | 'subs'>('all');
+
   const matches = lookups.matchId ?? [];
   const allTeams = lookups.teamId ?? [];
   const allPlayers = lookups.playerId ?? [];
@@ -172,6 +346,7 @@ function LineupEditor({
     : [];
   const teams = allTeams.filter((team) => teamIds.includes(String(team.id)));
   const roster = allPlayers.filter((player) => String(player.team_id ?? '') === teamId);
+
   const previewPlayers = players.map((player) => {
     const record = roster.find((item) => String(item.id) === player.playerId);
     return {
@@ -184,6 +359,74 @@ function LineupEditor({
   });
   const previewTeamName = teams.find((team) => String(team.id) === teamId)?.name;
 
+  function populateRosterToSquad(rosterList: RecordData[], targetFormation: string) {
+    if (!rosterList.length) return;
+    const defaultPositions = getFormationDefaultPositions(targetFormation);
+    const squad: LineupPlayer[] = [];
+    const usedIds = new Set<string>();
+
+    // 1. Assign GK first
+    const gk = rosterList.find((p) => ['GK', 'GOALKEEPER'].includes(String(p.position || '').toUpperCase()));
+    if (gk) {
+      squad.push({
+        playerId: String(gk.id),
+        position: 'GK',
+        shirtNumber: gk.shirt_number != null ? String(gk.shirt_number) : '',
+        isStarting: true,
+      });
+      usedIds.add(String(gk.id));
+    }
+
+    // 2. Assign remaining starters (up to 11) matching formation positions
+    const remainingSlots = defaultPositions.slice(squad.length);
+    for (const slotPos of remainingSlots) {
+      if (squad.length >= 11) break;
+      const match = rosterList.find((p) => {
+        if (usedIds.has(String(p.id))) return false;
+        const playerPos = String(p.position || '').toUpperCase();
+        return playerPos === slotPos || lineupLine(playerPos, targetFormation) === lineupLine(slotPos, targetFormation);
+      });
+      if (match) {
+        squad.push({
+          playerId: String(match.id),
+          position: match.position ? String(match.position).toUpperCase() : slotPos,
+          shirtNumber: match.shirt_number != null ? String(match.shirt_number) : '',
+          isStarting: true,
+        });
+        usedIds.add(String(match.id));
+      }
+    }
+
+    // If still under 11, fill from available roster
+    for (const p of rosterList) {
+      if (squad.length >= 11) break;
+      if (!usedIds.has(String(p.id))) {
+        squad.push({
+          playerId: String(p.id),
+          position: p.position ? String(p.position).toUpperCase() : 'CM',
+          shirtNumber: p.shirt_number != null ? String(p.shirt_number) : '',
+          isStarting: true,
+        });
+        usedIds.add(String(p.id));
+      }
+    }
+
+    // 3. Add ALL remaining roster players as substitutes
+    for (const p of rosterList) {
+      if (!usedIds.has(String(p.id)) && squad.length < 30) {
+        squad.push({
+          playerId: String(p.id),
+          position: p.position ? String(p.position).toUpperCase() : 'SUB',
+          shirtNumber: p.shirt_number != null ? String(p.shirt_number) : '',
+          isStarting: false,
+        });
+        usedIds.add(String(p.id));
+      }
+    }
+
+    setPlayers(squad);
+  }
+
   function changeMatch(value: string) {
     setMatchId(value);
     setTeamId('');
@@ -192,8 +435,50 @@ function LineupEditor({
 
   function changeTeam(value: string) {
     setTeamId(value);
-    setPlayers(existingLineupPlayers(rows, matchId, value));
+    const existing = existingLineupPlayers(rows, matchId, value);
+    if (existing.length > 0) {
+      setPlayers(existing);
+    } else {
+      const teamRoster = allPlayers.filter((player) => String(player.team_id ?? '') === value);
+      if (teamRoster.length > 0) {
+        populateRosterToSquad(teamRoster, formation);
+      } else {
+        setPlayers([]);
+      }
+    }
   }
+
+  function handleAutoFillAll() {
+    populateRosterToSquad(roster, formation);
+  }
+
+  function handleRealignFormation(newFormation: string) {
+    setFormation(newFormation);
+    const defaultPositions = getFormationDefaultPositions(newFormation);
+    let starterIndex = 0;
+    setPlayers((current) =>
+      current.map((player) => {
+        if (!player.isStarting) return player;
+        const assignedPos = defaultPositions[starterIndex] || player.position;
+        starterIndex++;
+        return {
+          ...player,
+          position: assignedPos,
+        };
+      }),
+    );
+  }
+
+  const startersCount = players.filter((p) => p.isStarting).length;
+  const subsCount = players.filter((p) => !p.isStarting).length;
+
+  const filteredPlayers = players
+    .map((player, index) => ({ player, originalIndex: index }))
+    .filter(({ player }) => {
+      if (squadFilter === 'starters') return player.isStarting;
+      if (squadFilter === 'subs') return !player.isStarting;
+      return true;
+    });
 
   return (
     <div className="lineup-editor">
@@ -233,81 +518,237 @@ function LineupEditor({
       </label>
       <label className="lineup-form-field">
         <span>Formation *</span>
-        <select required value={formation} onChange={(event) => setFormation(event.target.value)}>
+        <select required value={formation} onChange={(event) => handleRealignFormation(event.target.value)}>
           {formationOptions.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
       </label>
+
+      {/* Squad Member Builder with all members and respective positions */}
       <div className="lineup-squad-editor">
-        <div className="lineup-squad-heading"><strong>Squad members</strong><span>{players.filter((player) => player.isStarting).length}/11 starters · {players.length}/30 squad members</span></div>
-        {players.map((player, index) => (
-          <div className="lineup-member-row" key={`${index}-${player.playerId}`}>
-            <select
-              aria-label={`Player ${index + 1}`}
-              required
-              value={player.playerId}
-              onChange={(event) => setPlayers((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, playerId: event.target.value } : item))}
-            >
-              <option value="">Select player…</option>
-              {roster.map((record) => (
-                <option
-                  key={String(record.id)}
-                  value={String(record.id)}
-                  disabled={players.some((item, rowIndex) => item.playerId === String(record.id) && rowIndex !== index)}
-                >
-                  {String(record.name ?? 'Player')}{record.shirt_number ? ` · #${record.shirt_number}` : ''}
-                </option>
-              ))}
-            </select>
-            <select
-              aria-label={`Position ${index + 1}`}
-              value={player.position}
-              onChange={(event) => setPlayers((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, position: event.target.value } : item))}
-            >
-              {lineupPositionOptions.map((position) => <option key={position} value={position}>{position}</option>)}
-            </select>
-            <input
-              aria-label={`Shirt number ${index + 1}`}
-              type="number"
-              min="1"
-              max="99"
-              placeholder="#"
-              value={player.shirtNumber}
-              onChange={(event) => setPlayers((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, shirtNumber: event.target.value } : item))}
-            />
-            <label className="lineup-starter-toggle">
-              <input
-                type="checkbox"
-                checked={player.isStarting}
-                disabled={!player.isStarting && players.filter((item) => item.isStarting).length >= 11}
-                onChange={(event) => setPlayers((current) => current.map((item, rowIndex) => rowIndex === index ? { ...item, isStarting: event.target.checked } : item))}
-              />
-              Starter
-            </label>
-            <button type="button" className="player-stat-remove" aria-label={`Remove player ${index + 1}`} onClick={() => setPlayers((current) => current.filter((_, rowIndex) => rowIndex !== index))}>Remove</button>
+        <div className="lineup-squad-heading">
+          <div>
+            <strong>Squad Members & Positions</strong>
+            <span className="lineup-squad-subtext">Put all squad members with their positions, shirt numbers and starter roles</span>
           </div>
-        ))}
-        <button
-          type="button"
-          className="button button-light"
-          disabled={!teamId || players.length >= 30 || players.length >= roster.length}
-          onClick={() => setPlayers((current) => [...current, {
-            playerId: '',
-            position: current.length === 0 ? 'GK' : 'CM',
-            shirtNumber: '',
-            isStarting: current.filter((player) => player.isStarting).length < 11,
-          }])}
-        >
-          Add squad member
-        </button>
-        {teamId && roster.length === 0 && <small>Add this team’s players in the Players section before building the lineup.</small>}
+          <div className="lineup-squad-stats">
+            <span className={`lineup-badge ${startersCount === 11 ? 'badge-success' : 'badge-warning'}`}>
+              {startersCount}/11 Starters
+            </span>
+            <span className="lineup-badge badge-neutral">
+              {subsCount} Substitutes
+            </span>
+            <span className="lineup-badge badge-neutral">
+              {players.length}/30 Total
+            </span>
+          </div>
+        </div>
+
+        {/* Quick Actions Bar */}
+        <div className="lineup-squad-actions">
+          <button
+            type="button"
+            className="button button-primary lineup-btn-action"
+            disabled={!teamId || roster.length === 0}
+            onClick={handleAutoFillAll}
+            title="Automatically populate all players from the team roster with their default positions, shirt numbers, and starting 11"
+          >
+            <span>⚡</span> Load All Roster Members ({roster.length})
+          </button>
+          <button
+            type="button"
+            className="button button-light lineup-btn-action"
+            disabled={!teamId || players.length === 0}
+            onClick={() => handleRealignFormation(formation)}
+            title="Re-align the 11 starting positions to match the selected formation"
+          >
+            <span>⚽</span> Auto-align Formation Positions
+          </button>
+          <button
+            type="button"
+            className="button button-light lineup-btn-action"
+            disabled={!teamId || players.length >= 30 || players.length >= roster.length}
+            onClick={() => {
+              const unassigned = roster.find((r) => !players.some((p) => p.playerId === String(r.id)));
+              setPlayers((current) => [
+                ...current,
+                {
+                  playerId: unassigned ? String(unassigned.id) : '',
+                  position: unassigned?.position ? String(unassigned.position).toUpperCase() : (current.length === 0 ? 'GK' : 'CM'),
+                  shirtNumber: unassigned?.shirt_number != null ? String(unassigned.shirt_number) : '',
+                  isStarting: current.filter((player) => player.isStarting).length < 11,
+                },
+              ]);
+            }}
+          >
+            <span>+</span> Add Member
+          </button>
+          {players.length > 0 && (
+            <button
+              type="button"
+              className="button button-light lineup-btn-danger"
+              onClick={() => setPlayers([])}
+            >
+              Clear All
+            </button>
+          )}
+        </div>
+
+        {/* View Filter */}
+        {players.length > 0 && (
+          <div className="lineup-filter-tabs">
+            <button
+              type="button"
+              className={`lineup-tab ${squadFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setSquadFilter('all')}
+            >
+              All Squad ({players.length})
+            </button>
+            <button
+              type="button"
+              className={`lineup-tab ${squadFilter === 'starters' ? 'active' : ''}`}
+              onClick={() => setSquadFilter('starters')}
+            >
+              Starting XI ({startersCount}/11)
+            </button>
+            <button
+              type="button"
+              className={`lineup-tab ${squadFilter === 'subs' ? 'active' : ''}`}
+              onClick={() => setSquadFilter('subs')}
+            >
+              Substitutes ({subsCount})
+            </button>
+          </div>
+        )}
+
+        {/* Squad Members List */}
+        <div className="lineup-members-table">
+          <div className="lineup-members-table-header">
+            <span>Player</span>
+            <span>Position</span>
+            <span>Shirt #</span>
+            <span>Status</span>
+            <span>Action</span>
+          </div>
+          {filteredPlayers.map(({ player, originalIndex }) => (
+            <div className={`lineup-member-row ${player.isStarting ? 'is-starter' : 'is-sub'}`} key={`${originalIndex}-${player.playerId}`}>
+              <select
+                aria-label={`Player ${originalIndex + 1}`}
+                required
+                value={player.playerId}
+                onChange={(event) => {
+                  const newPlayerId = event.target.value;
+                  const rosterRecord = roster.find((r) => String(r.id) === newPlayerId);
+                  setPlayers((current) =>
+                    current.map((item, rowIndex) =>
+                      rowIndex === originalIndex
+                        ? {
+                            ...item,
+                            playerId: newPlayerId,
+                            position: rosterRecord?.position ? String(rosterRecord.position).toUpperCase() : item.position,
+                            shirtNumber: rosterRecord?.shirt_number != null ? String(rosterRecord.shirt_number) : item.shirtNumber,
+                          }
+                        : item,
+                    ),
+                  );
+                }}
+              >
+                <option value="">Select player…</option>
+                {roster.map((record) => (
+                  <option
+                    key={String(record.id)}
+                    value={String(record.id)}
+                    disabled={players.some((item, rowIndex) => item.playerId === String(record.id) && rowIndex !== originalIndex)}
+                  >
+                    {String(record.name ?? 'Player')}{record.position ? ` (${record.position})` : ''}{record.shirt_number ? ` · #${record.shirt_number}` : ''}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                aria-label={`Position ${originalIndex + 1}`}
+                value={player.position}
+                onChange={(event) =>
+                  setPlayers((current) =>
+                    current.map((item, rowIndex) => (rowIndex === originalIndex ? { ...item, position: event.target.value } : item)),
+                  )
+                }
+              >
+                {lineupPositionOptions.map((position) => (
+                  <option key={position} value={position}>
+                    {position}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                aria-label={`Shirt number ${originalIndex + 1}`}
+                type="number"
+                min="1"
+                max="99"
+                placeholder="#"
+                value={player.shirtNumber}
+                onChange={(event) =>
+                  setPlayers((current) =>
+                    current.map((item, rowIndex) => (rowIndex === originalIndex ? { ...item, shirtNumber: event.target.value } : item)),
+                  )
+                }
+              />
+
+              <label className={`lineup-starter-toggle-btn ${player.isStarting ? 'starter-active' : 'sub-active'}`}>
+                <input
+                  type="checkbox"
+                  checked={player.isStarting}
+                  disabled={!player.isStarting && startersCount >= 11}
+                  onChange={(event) =>
+                    setPlayers((current) =>
+                      current.map((item, rowIndex) => (rowIndex === originalIndex ? { ...item, isStarting: event.target.checked } : item)),
+                    )
+                  }
+                />
+                <span>{player.isStarting ? '★ Starter' : 'Bench'}</span>
+              </label>
+
+              <button
+                type="button"
+                className="player-stat-remove"
+                aria-label={`Remove player ${originalIndex + 1}`}
+                onClick={() => setPlayers((current) => current.filter((_, rowIndex) => rowIndex !== originalIndex))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {teamId && roster.length === 0 && (
+          <small className="lineup-warning-text">Add players to this team in the Players section before building the lineup.</small>
+        )}
       </div>
+
+      {/* Live Broadcast Graphic Preview */}
       {previewPlayers.length > 0 && (
-        <LineupGraphic
-          teamName={String(previewTeamName ?? 'Team')}
-          formation={formation}
-          players={previewPlayers}
-        />
+        <div className="lineup-editor-preview-container">
+          <div className="lineup-preview-heading">
+            <strong>Confirmed Line-up Broadcast Graphic Preview</strong>
+            <span>Live visual pitch rendering matching broadcast display</span>
+          </div>
+          <LineupGraphic
+            teamName={String(previewTeamName ?? 'Team')}
+            formation={formation}
+            players={previewPlayers}
+            matchInfo={{
+              homeTeam: String(selectedMatch?.home_team ?? previewTeamName ?? ''),
+              awayTeam: String(selectedMatch?.away_team ?? ''),
+              homeCrestUrl: String(selectedMatch?.home_crest_url ?? ''),
+              awayCrestUrl: String(selectedMatch?.away_crest_url ?? ''),
+              stage: String(selectedMatch?.stage ?? ''),
+              venueName: String(selectedMatch?.venue_name ?? ''),
+              kickoffAt: String(selectedMatch?.kickoff_at ?? ''),
+            }}
+          />
+        </div>
       )}
+
       <label className="lineup-publish-toggle">
         <input type="checkbox" checked={published} onChange={(event) => setPublished(event.target.checked)} />
         Publish line-up to the app
